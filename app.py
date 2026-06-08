@@ -4,7 +4,7 @@ import sqlite3
 # Configuração da página para visual amplo
 st.set_page_config(page_title="Rifa KRT", layout="wide")
 
-st.title("🎫 Controle de Rifa - KRT (Com Banco de Dados)")
+st.title("🎫 Controle de Rifa - KRT")
 
 # 1. Definição do intervalo de números
 NUM_INICIAL = 4847
