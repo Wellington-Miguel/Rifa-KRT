@@ -19,7 +19,10 @@ def conectar_gsheets():
     """Conecta ao Google Sheets usando as credenciais do Streamlit Secrets."""
     creds = Credentials.from_service_account_info(
         st.secrets["gcp_service_account"],
-        scopes=["https://www.googleapis.com/auth/spreadsheets"],
+        scopes=[
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive",
+        ],
     )
     client = gspread.authorize(creds)
     # Cole aqui o nome EXATO da sua planilha
