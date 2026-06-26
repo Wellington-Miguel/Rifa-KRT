@@ -26,41 +26,59 @@ def conectar_gsheets():
     )
     client = gspread.authorize(creds)
     # Cole aqui o nome EXATO da sua planilha
-    spreadsheet = client.open("Rifa KRT") 
+    spreadsheet = client.open("Rifa KRT")
     worksheet = spreadsheet.worksheet("rifa")
     return worksheet
 
 @st.cache_data(ttl=60)
 def inicializar_numeros():
-    """Popula a planilha com todos os números da rifa se estiver vazia."""
+    """Popula a planilha com todos os números da rifa se estiver vazia ou com cabeçalhos inválidos."""
     HEADERS = ["numero", "vendido"]
     sheet = conectar_gsheets()
-    
-    # Verifica se a planilha está completamente vazia (sem cabeçalhos)
-    if not sheet.get_all_values():
-        # 1. Cria os cabeçalhos
+
+    dados_existentes = sheet.get_all_values()
+
+    # Reinicializa se a planilha estiver vazia OU se os cabeçalhos estiverem errados
+    if not dados_existentes or dados_existentes[0] != HEADERS:
+        # 1. Limpa a planilha e recria os cabeçalhos
+        sheet.clear()
         sheet.update("A1", [HEADERS])
-        
+
         # 2. Cria a lista de números para inserir
-        dados = [{"numero": num, "vendido": 0} for num in range(NUM_INICIAL, NUM_FINAL + 1)]
-        
+        dados = [[num, 0] for num in range(NUM_INICIAL, NUM_FINAL + 1)]
+
         # 3. Insere os dados a partir da segunda linha
-        sheet.update("A2", [list(d.values()) for d in dados])
+        sheet.update("A2", dados)
 
 @st.cache_data(ttl=10)
 def obter_estado_vendas():
     """Busca o status atual de todos os números na planilha."""
     sheet = conectar_gsheets()
-    records = sheet.get_all_records()
-    # Converte para um dicionário {numero: True/False}
-    vendas = {row['numero']: bool(row['vendido']) for row in records}
+
+    # Usa get_all_values() para evitar GSpreadException por cabeçalhos duplicados/vazios
+    valores = sheet.get_all_values()
+
+    if len(valores) <= 1:  # Planilha vazia ou apenas com cabeçalho
+        return {}
+
+    # valores[0] = cabeçalhos, valores[1:] = dados
+    vendas = {}
+    for row in valores[1:]:
+        if len(row) >= 2 and row[0]:  # Garante que a linha tem dados válidos
+            try:
+                numero = int(row[0])
+                vendido = bool(int(row[1])) if row[1] else False
+                vendas[numero] = vendido
+            except (ValueError, IndexError):
+                continue  # Ignora linhas malformadas
+
     return vendas
 
 def atualizar_status_no_banco(numero, vendido):
     """Atualiza o status de um número específico na planilha."""
     sheet = conectar_gsheets()
     status = 1 if vendido else 0
-    
+
     # Encontra a linha correspondente ao número
     # A busca começa na linha 2, pois a linha 1 é o cabeçalho
     try:
@@ -79,7 +97,6 @@ inicializar_numeros()
 estado_vendas = obter_estado_vendas()
 
 # Listas de apoio para os componentes da tela
-# Garante que a chave 'numero' exista antes de tentar acessá-la
 numeros_livres = [num for num, vendido in estado_vendas.items() if not vendido]
 numeros_vendidos = sorted([num for num, vendido in estado_vendas.items() if vendido])
 
@@ -104,7 +121,7 @@ if numeros_vendidos:
         ">
             {', '.join(map(str, numeros_vendidos))}
         </div>
-        """, 
+        """,
         unsafe_allow_html=True
     )
 else:
@@ -116,13 +133,13 @@ st.sidebar.markdown("---")
 st.sidebar.subheader("🔄 Tornar Disponível")
 if numeros_vendidos:
     num_para_liberar = st.sidebar.selectbox(
-        "Selecione para remover dos vendidos:", 
-        options=numeros_vendidos, 
-        index=None, 
+        "Selecione para remover dos vendidos:",
+        options=numeros_vendidos,
+        index=None,
         placeholder="Escolha o número...",
         key="sb_liberar_unico"
     )
-    
+
     if st.sidebar.button("⚠️ Confirmar Liberação", type="secondary", use_container_width=True):
         if num_para_liberar:
             atualizar_status_no_banco(num_para_liberar, vendido=False)
@@ -154,8 +171,8 @@ with col_sel:
     )
 
 with col_btn:
-    st.write("") # Alinhamento estético
-    st.write("") 
+    st.write("")  # Alinhamento estético
+    st.write("")
     if st.button("🔒 Marcar como Vendido", type="primary", use_container_width=True):
         if num_para_vender:
             atualizar_status_no_banco(num_para_vender, vendido=True)
@@ -174,14 +191,14 @@ numeros_lista = list(range(NUM_INICIAL, NUM_FINAL + 1))
 for i in range(0, len(numeros_lista), COLUNAS_GRADE):
     bloco = numeros_lista[i:i + COLUNAS_GRADE]
     cols = st.columns(COLUNAS_GRADE)
-    
+
     for idx, num in enumerate(bloco):
         com_col = cols[idx]
-        esta_vendido = estado_vendas[num]
-        
+        esta_vendido = estado_vendas.get(num, False)
+
         # Cores baseadas no status vindo do Banco
         cor_fundo = "#ff4b4b" if esta_vendido else "#28a745"
-        
+
         # Renderização do Card na Matriz
         com_col.markdown(
             f"""
@@ -197,6 +214,6 @@ for i in range(0, len(numeros_lista), COLUNAS_GRADE):
             ">
                 {num}
             </div>
-            """, 
+            """,
             unsafe_allow_html=True
         )
