@@ -33,12 +33,18 @@ def conectar_gsheets():
 @st.cache_data(ttl=60)
 def inicializar_numeros():
     """Popula a planilha com todos os números da rifa se estiver vazia."""
+    HEADERS = ["numero", "vendido"]
     sheet = conectar_gsheets()
-    # Verifica se a planilha tem apenas o cabeçalho
-    if len(sheet.get_all_records()) == 0:
-        # Cria uma lista de dicionários para inserir
+    
+    # Verifica se a planilha está completamente vazia (sem cabeçalhos)
+    if not sheet.get_all_values():
+        # 1. Cria os cabeçalhos
+        sheet.update("A1", [HEADERS])
+        
+        # 2. Cria a lista de números para inserir
         dados = [{"numero": num, "vendido": 0} for num in range(NUM_INICIAL, NUM_FINAL + 1)]
-        # Insere os dados a partir da segunda linha
+        
+        # 3. Insere os dados a partir da segunda linha
         sheet.update("A2", [list(d.values()) for d in dados])
 
 @st.cache_data(ttl=10)
