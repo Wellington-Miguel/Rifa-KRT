@@ -1,5 +1,7 @@
 import streamlit as st
-import sqlite3
+import gspread
+from google.oauth2.service_account import Credentials
+import pandas as pd
 
 # Configuração da página para visual amplo
 st.set_page_config(page_title="Rifa KRT", layout="wide")
@@ -11,60 +13,64 @@ NUM_INICIAL = 4847
 NUM_FINAL = 4977
 total_numeros = NUM_FINAL - NUM_INICIAL + 1
 
-# --- FUNÇÕES DO BANCO DE DADOS (SQLITE) ---
-def conectar_banco():
-    """Conecta ao banco SQLite e garante que a tabela exista."""
-    conn = sqlite3.connect("rifa_krt.db")
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS rifa (
-            numero INTEGER PRIMARY KEY,
-            vendido INTEGER DEFAULT 0
-        )
-    """)
-    conn.commit()
-    return conn
+# --- FUNÇÕES DO GOOGLE SHEETS ---
+@st.cache_resource
+def conectar_gsheets():
+    """Conecta ao Google Sheets usando as credenciais do Streamlit Secrets."""
+    creds = Credentials.from_service_account_info(
+        st.secrets["gcp_service_account"],
+        scopes=["https://www.googleapis.com/auth/spreadsheets"],
+    )
+    client = gspread.authorize(creds)
+    # Cole aqui o nome EXATO da sua planilha
+    spreadsheet = client.open("Rifa KRT") 
+    worksheet = spreadsheet.worksheet("rifa")
+    return worksheet
 
+@st.cache_data(ttl=60)
 def inicializar_numeros():
-    """Popula o banco com todos os números da rifa se estiver vazio."""
-    conn = conectar_banco()
-    cursor = conn.cursor()
-    
-    # Verifica se já existem registros
-    cursor.execute("SELECT COUNT(*) FROM rifa")
-    if cursor.fetchone()[0] == 0:
-        # Insere todos os números do intervalo como não vendidos (0)
-        dados = [(num, 0) for num in range(NUM_INICIAL, NUM_FINAL + 1)]
-        cursor.executemany("INSERT INTO rifa (numero, vendido) VALUES (?, ?)", dados)
-        conn.commit()
-    conn.close()
+    """Popula a planilha com todos os números da rifa se estiver vazia."""
+    sheet = conectar_gsheets()
+    # Verifica se a planilha tem apenas o cabeçalho
+    if len(sheet.get_all_records()) == 0:
+        # Cria uma lista de dicionários para inserir
+        dados = [{"numero": num, "vendido": 0} for num in range(NUM_INICIAL, NUM_FINAL + 1)]
+        # Insere os dados a partir da segunda linha
+        sheet.update("A2", [list(d.values()) for d in dados])
 
+@st.cache_data(ttl=10)
 def obter_estado_vendas():
-    """Busca o status atual de todos os números no banco."""
-    conn = conectar_banco()
-    cursor = conn.cursor()
-    cursor.execute("SELECT numero, vendido FROM rifa")
-    # Retorna um dicionário {numero: True/False}
-    vendas = {row[0]: bool(row[1]) for row in cursor.fetchall()}
-    conn.close()
+    """Busca o status atual de todos os números na planilha."""
+    sheet = conectar_gsheets()
+    records = sheet.get_all_records()
+    # Converte para um dicionário {numero: True/False}
+    vendas = {row['numero']: bool(row['vendido']) for row in records}
     return vendas
 
 def atualizar_status_no_banco(numero, vendido):
-    """Atualiza o status de um número específico (1 para vendido, 0 para livre)."""
-    conn = conectar_banco()
-    cursor = conn.cursor()
+    """Atualiza o status de um número específico na planilha."""
+    sheet = conectar_gsheets()
     status = 1 if vendido else 0
-    cursor.execute("UPDATE rifa SET vendido = ? WHERE numero = ?", (status, numero))
-    conn.commit()
-    conn.close()
+    
+    # Encontra a linha correspondente ao número
+    # A busca começa na linha 2, pois a linha 1 é o cabeçalho
+    try:
+        cell = sheet.find(str(numero), in_column=1)
+        # Atualiza a célula na coluna 'vendido' (coluna 2)
+        sheet.update_cell(cell.row, 2, status)
+        # Limpa o cache para que a próxima leitura obtenha os dados atualizados
+        st.cache_data.clear()
+    except gspread.exceptions.CellNotFound:
+        st.error(f"Erro: Número {numero} não encontrado na planilha para atualização.")
 
-# Inicializa a estrutura do banco de dados
+# Inicializa a estrutura da planilha
 inicializar_numeros()
 
-# Carrega os dados atualizados do banco
+# Carrega os dados atualizados da planilha
 estado_vendas = obter_estado_vendas()
 
 # Listas de apoio para os componentes da tela
+# Garante que a chave 'numero' exista antes de tentar acessá-la
 numeros_livres = [num for num, vendido in estado_vendas.items() if not vendido]
 numeros_vendidos = sorted([num for num, vendido in estado_vendas.items() if vendido])
 
